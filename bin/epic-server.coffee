@@ -17,6 +17,7 @@ durations   = new durations.DurationTracker()
 os          = require 'os'
 cluster     = require 'cluster'
 generic_pool = require 'generic-pool'
+jwt         = require 'express-jwt'
 
 config =
   sql:
@@ -60,6 +61,7 @@ config =
   status_dir: process.env.EPIQUERY_STATUS_DIR || '/dev/shm'
   worker_count: process.env.EPIQUERY_WORKER_COUNT || os.cpus().length
   max_pooled_connections: process.env.EPIQUERY_MAX_POOLED_CONNECTIONS || 10
+  jwt_secret: process.env.JWT_SECRET
 
 # currently we're only pooling mssql connections, and that's all handled down below
 connection_pools = {}
@@ -351,7 +353,7 @@ handle_errors_in_query_execution = (callback) ->
     ctx.connection?.is_good = false
     ctx.connection?.release_to_pool()
     callback(ctx.error, ctx.result_sets, ctx.rendered_template)
-    
+
 exec_sql_query = (req, template_name, template_context, callback) ->
   get_connection_config req, 'sql'
   create_context_for_request(req, template_name, template_context, req.epi_ctx.pool_key, req.epi_ctx.connection_config, config)
@@ -367,7 +369,7 @@ exec_sql_query = (req, template_name, template_context, callback) ->
   )["catch"]( (err) -> log.error("error in error handler", err.stack) )
 # </mssql query handling>
 ##########################################################
-  
+
 ##########################################################
 # <mysql query handling>
 exec_mysql_query = (req, template_name, template_context, callback) ->
@@ -472,7 +474,7 @@ exec_mdx_query = (req, template_name, template_context, callback) ->
     log.error('MDX query failed to load template error=' + error)
     callback error, null
   ).done()
-  
+
 # here we will create a full path to the file that will be used to store any
 # status about a currently executing request so this will return a path that
 # should be unique to a request running in the process handling
@@ -625,6 +627,7 @@ request_helper = (req, resp) ->
 
 app = express()
 app.use express.bodyParser()
+app.use(jwt({secret: config.jwt_secret}).unless({path: ['/diagnostic']}))
 app.get '/stats', (req, resp, next) ->
   stats=
     runningQueries: durations.getRunningItems()
@@ -654,7 +657,7 @@ if cluster.isMaster
   [ fork_worker() for i in [1..config.worker_count] ]
 else
   log.info "worker starting on port #{config.http_port}"
-  # if we don't have a status dir set ( it must exist ) 
+  # if we don't have a status dir set ( it must exist )
   # then we'll drop the status_dir value since we'll later use it as a flag
   # to determine if we shold log status
   if ( !fs.existsSync(config.status_dir) )
