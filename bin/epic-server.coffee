@@ -628,6 +628,12 @@ request_helper = (req, resp) ->
 app = express()
 app.use express.bodyParser()
 app.use(jwt({secret: config.jwt_secret}).unless({path: ['/diagnostic']}))
+app.use (err, req, res, next) ->
+  if err?.name == 'UnauthorizedError'
+    console.log("JWT Error", req.url, req.headers['authorization']);
+
+  next(err)
+
 app.get '/stats', (req, resp, next) ->
   stats=
     runningQueries: durations.getRunningItems()
